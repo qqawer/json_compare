@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>JSON Compare</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial; margin: 20px; }
+textarea { width:100%; min-height:280px; font-family: monospace; font-size:13px; padding:10px; box-sizing:border-box; }
+pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px; overflow:auto; white-space:pre-wrap; }
+.container { display:flex; gap:16px; }
+.col { flex:1; display:flex; flex-direction:column; }
+.controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
+.diff-list { margin-top:12px; border-collapse:collapse; width:100%; }
+.diff-list th, .diff-list td { border:1px solid #eee; padding:8px; text-align:left; vertical-align:top; }
+.type-added { background:#e6ffed; }
+.type-removed { background:#fff0f0; }
+.type-modified { background:#fffbe6; }
+.small { font-size:12px; color:#666; }
+</style>
+</head>
+<body>
+  <h2>JSON Compare (local)</h2>
+  <p>在左/右编辑区直接粘贴或打开文件，系统会在两边都有内容时自动比较并展示差异。</p>
+
+  <div class="container">
+    <div class="col">
+      <h4>Pretty A (editable)</h4>
+      <textarea id="ta" placeholder="在此粘贴或编辑 JSON A"></textarea>
+      <div class="controls">
+        <input type="file" id="fileA" accept="application/json" />
+        <button id="fmtA">格式化 A</button>
+        <button id="clearA">清空 A</button>
+        <button id="dlA">下载 A</button>
+      </div>
+    </div>
+
+    <div class="col">
+      <h4>Pretty B (editable)</h4>
+      <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
+      <div class="controls">
+        <input type="file" id="fileB" accept="application/json" />
+        <button id="fmtB">格式化 B</button>
+        <button id="clearB">清空 B</button>
+        <button id="dlB">下载 B</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:18px">
+    <h4>Diff (ASCII)</h4>
+    <pre id="diff">-- 比较结果将在这里显示 --</pre>
+
+    <h4 style="margin-top:12px">Structured differences</h4>
+    <div id="diffContainer">
+      <table class="diff-list" id="diffTable" style="display:none;">
+        <thead><tr><th>Path</th><th>Type</th><th>A</th><th>B</th></tr></thead>
+        <tbody id="diffBody"></tbody>
+      </table>
+      <div id="noDiff" class="small">暂无差异或尚未比较</div>
+    </div>
+
+    <div style="margin-top:12px">
+      <button id="dlPatch">下载 Patch</button>
+      <button id="forceCompare">强制比较</button>
+    </div>
+  </div>
+
+<script>
+// helpers
+function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); }; }
+function prettyTry(text){ try{ const j = JSON.parse(text); return JSON.stringify(j, null, 2); }catch(e){ return text; } }
+function short(v){ try{ return JSON.stringify(v); }catch(e){ return String(v); } }
+
+async function loadFileInput(el, targetTextarea){ if(!el.files[0]) return; const txt = await el.files[0].text(); targetTextarea.value = txt; targetTextarea.dispatchEvent(new Event('input')); }
+
+const ta = document.getElementById('ta');
+const tb = document.getElementById('tb');
+const fileA = document.getElementById('fileA');
+const fileB = document.getElementById('fileB');
+const diffEl = document.getElementById('diff');
+const diffTable = document.getElementById('diffTable');
+const diffBody = document.getElementById('diffBody');
+const noDiff = document.getElementById('noDiff');
+
+fileA.addEventListener('change', ()=> loadFileInput(fileA, ta));
+fileB.addEventListener('change', ()=> loadFileInput(fileB, tb));
+
+document.getElementById('fmtA').addEventListener('click', ()=> { ta.value = prettyTry(ta.value); ta.dispatchEvent(new Event('input')); });
+document.getElementById('fmtB').addEventListener('click', ()=> { tb.value = prettyTry(tb.value); tb.dispatchEvent(new Event('input')); });
+document.getElementById('clearA').addEventListener('click', ()=> { ta.value=''; ta.dispatchEvent(new Event('input')); });
+document.getElementById('clearB').addEventListener('click', ()=> { tb.value=''; tb.dispatchEvent(new Event('input')); });
+document.getElementById('dlA').addEventListener('click', ()=> dl('prettyA.json', ta.value));
+document.getElementById('dlB').addEventListener('click', ()=> dl('prettyB.json', tb.value));
+document.getElementById('forceCompare').addEventListener('click', compare);
+
+autoCompare = true;
+const maybeCompare = debounce(()=>{ if(ta.value.trim()!=='' && tb.value.trim()!=='') compare(); else { diffEl.textContent='-- 比较结果将在这里显示 --'; diffTable.style.display='none'; noDiff.style.display='block'; } }, 400);
+
+ta.addEventListener('input', maybeCompare);
+tb.addEventListener('input', maybeCompare);
+
+async function compare(){
+  const aText = ta.value;
+  const bText = tb.value;
+  if(aText.trim()==='' || bText.trim()==='') return;
+  diffEl.textContent = '比较中...';
+  const fd = new FormData();
+  fd.append('fileA', new Blob([aText], {type:'application/json'}), 'a.json');
+  fd.append('fileB', new Blob([bText], {type:'application/json'}), 'b.json');
+  try{
+    const res = await fetch('/compare', { method:'POST', body: fd });
+    if(!res.ok){ diffEl.textContent = '服务器错误'; return; }
+    const j = await res.json();
+    // show pretty versions (server may have normalized)
+    if(j.prettyA) ta.value = j.prettyA;
+    if(j.prettyB) tb.value = j.prettyB;
+    diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --';
+    renderDiffList(j.diffList || []);
+    window._last = j;
+  }catch(e){ diffEl.textContent = '比较失败: '+e.message; }
+}
+
+function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length===0){ diffTable.style.display='none'; noDiff.style.display='block'; return; }
+  noDiff.style.display='none'; diffTable.style.display='table';
+  list.forEach(item=>{
+    const tr = document.createElement('tr');
+    const tdPath = document.createElement('td'); tdPath.textContent = item.path; tr.appendChild(tdPath);
+    const tdType = document.createElement('td'); tdType.textContent = item.type; tr.appendChild(tdType);
+    const tdA = document.createElement('td'); tdA.textContent = item.a===undefined? '': short(item.a); tr.appendChild(tdA);
+    const tdB = document.createElement('td'); tdB.textContent = item.b===undefined? '': short(item.b); tr.appendChild(tdB);
+    if(item.type==='added') tr.classList.add('type-added');
+    if(item.type==='removed') tr.classList.add('type-removed');
+    if(item.type==='modified') tr.classList.add('type-modified');
+    // clicking a diff row will try to jump to the key in both panes (A then B)
+    tr.style.cursor = 'pointer';
+    tr.title = '点击跳转并选中对应字段（先在 A 中查找，再在 B 中）';
+    tr.addEventListener('click', ()=> jumpToPathInPanes(item.path));
+    diffBody.appendChild(tr);
+  });
+}
+
+// try to jump to a token (last key or array index) in both textareas
+function jumpToPathInPanes(path){
+  // derive token: last key name or index
+  if(!path) return;
+  // remove leading $. and split by . and []
+  let token = path.replace(/^\$\.?/, '');
+  // get last segment after dot
+  const parts = token.split('.');
+  token = parts[parts.length-1] || token;
+  // strip array indexes if present, e.g. items[3] -> items or [3] -> 3
+  const m = token.match(/^(.*)\[(\d+)\]$/);
+  if(m){ token = m[1] || m[2]; }
+  token = token.replace(/\[|\]|"/g, '').trim();
+  if(!token) token = path; // fallback
+  // try A first, then B
+  if(!jumpToTokenInTextarea(ta, token)){
+    jumpToTokenInTextarea(tb, token);
+  }
+}
+
+function jumpToTokenInTextarea(textarea, token){
+  const txt = textarea.value;
+  if(!txt || !token) return false;
+  // try searching for "token" or token with quotes
+  const q1 = '"' + token + '"';
+  let idx = txt.indexOf(q1);
+  if(idx === -1) idx = txt.indexOf(token);
+  if(idx === -1) return false;
+  // select the whole line containing idx
+  let start = txt.lastIndexOf('\n', idx);
+  start = start === -1 ? 0 : start + 1;
+  let end = txt.indexOf('\n', idx);
+  end = end === -1 ? txt.length : end;
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+  // scroll to the selection: compute line number and approximate scroll
+  const before = txt.slice(0, start);
+  const lineNumber = (before.match(/\n/g)||[]).length;
+  const lineHeight = 18; // approximate
+  textarea.scrollTop = Math.max(0, lineNumber*lineHeight - 40);
+  return true;
+}
+
+function dl(filename, text){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text||''],{type:'application/json'})); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); }
+
+document.getElementById('dlPatch').addEventListener('click', ()=> dl('patch.json', (window._last||{}).patch || ''));
+
+// if initial contents exist, compare once
+maybeCompare();
+</script>
+</body>
+</html>
