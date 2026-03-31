@@ -20,6 +20,13 @@ type DiffItem struct {
 	B    interface{} `json:"b,omitempty"`
 }
 
+// ParseError describes a JSON parsing error with optional line/column
+type ParseError struct {
+	Message string `json:"message"`
+	Line    int    `json:"line,omitempty"`
+	Column  int    `json:"column,omitempty"`
+}
+
 func prettyJSON(b []byte) string {
 	var v interface{}
 	if err := json.Unmarshal(b, &v); err != nil {
@@ -28,6 +35,47 @@ func prettyJSON(b []byte) string {
 	}
 	out, _ := json.MarshalIndent(v, "", "  ")
 	return string(out)
+}
+
+// compute line and column (1-based) from byte offset (1-based)
+func lineColFromOffset(b []byte, offset int64) (int, int) {
+	if offset <= 0 {
+		return 0, 0
+	}
+	if offset > int64(len(b)) {
+		offset = int64(len(b))
+	}
+	// offset is 1-based
+	idx := int(offset - 1)
+	line := 1
+	col := 1
+	for i := 0; i < idx; i++ {
+		if b[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
+}
+
+func parseErrorFor(b []byte) *ParseError {
+	var v interface{}
+	err := json.Unmarshal(b, &v)
+	if err == nil {
+		return nil
+	}
+	switch e := err.(type) {
+	case *json.SyntaxError:
+		ln, col := lineColFromOffset(b, e.Offset)
+		return &ParseError{Message: e.Error(), Line: ln, Column: col}
+	case *json.UnmarshalTypeError:
+		ln, col := lineColFromOffset(b, e.Offset)
+		return &ParseError{Message: e.Error(), Line: ln, Column: col}
+	default:
+		return &ParseError{Message: err.Error()}
+	}
 }
 
 func joinPath(path, key string) string {
@@ -153,25 +201,37 @@ func compareHandler(w http.ResponseWriter, r *http.Request) {
 	prettyA := prettyJSON(a)
 	prettyB := prettyJSON(b)
 
-	differ := gojsondiff.New()
-	delta, err := differ.Compare(a, b)
-	if err != nil {
-		http.Error(w, "compare error: "+err.Error(), http.StatusInternalServerError)
-		return
+	// detect parse errors
+	errA := parseErrorFor(a)
+	errB := parseErrorFor(b)
+
+	// default placeholders
+	asciiStr := ""
+	patchStr := ""
+	var dList []DiffItem
+
+	// only compute diffs when both sides parsed OK
+	if errA == nil && errB == nil {
+		differ := gojsondiff.New()
+		delta, err := differ.Compare(a, b)
+		if err != nil {
+			http.Error(w, "compare error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var base interface{}
+		_ = json.Unmarshal(a, &base)
+
+		asciiCfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: false}
+		af := formatter.NewAsciiFormatter(base, asciiCfg)
+		asciiStr, _ = af.Format(delta)
+
+		deltaFmt := formatter.NewDeltaFormatter()
+		patchStr, _ = deltaFmt.Format(delta)
+
+		// structured diff list
+		dList, _ = generateDiffList(a, b)
 	}
-
-	var base interface{}
-	_ = json.Unmarshal(a, &base)
-
-	asciiCfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: false}
-	af := formatter.NewAsciiFormatter(base, asciiCfg)
-	asciiStr, _ := af.Format(delta)
-
-	deltaFmt := formatter.NewDeltaFormatter()
-	patchStr, _ := deltaFmt.Format(delta)
-
-	// structured diff list
-	dList, _ := generateDiffList(a, b)
 
 	resp := map[string]interface{}{
 		"prettyA":   prettyA,
@@ -180,6 +240,9 @@ func compareHandler(w http.ResponseWriter, r *http.Request) {
 		"patch":     patchStr,
 		"diffList":  dList,
 	}
+	if errA != nil { resp["errorA"] = errA }
+	if errB != nil { resp["errorB"] = errB }
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
