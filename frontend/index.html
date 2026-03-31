@@ -26,25 +26,27 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
     <div class="col">
       <h4>Pretty A (editable)</h4>
       <textarea id="ta" placeholder="在此粘贴或编辑 JSON A"></textarea>
-      <div class="controls">
-        <input type="file" id="fileA" accept="application/json" />
-        <button id="fmtA">格式化 A</button>
-        <button id="clearA">清空 A</button>
-        <button id="dlA">下载 A</button>
-      </div>
-    </div>
+      <div id="errorA" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
+       <div class="controls">
+         <input type="file" id="fileA" accept="application/json" />
+         <button id="fmtA">格式化 A</button>
+         <button id="clearA">清空 A</button>
+         <button id="dlA">下载 A</button>
+       </div>
+     </div>
 
-    <div class="col">
-      <h4>Pretty B (editable)</h4>
-      <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
-      <div class="controls">
-        <input type="file" id="fileB" accept="application/json" />
-        <button id="fmtB">格式化 B</button>
-        <button id="clearB">清空 B</button>
-        <button id="dlB">下载 B</button>
-      </div>
-    </div>
-  </div>
+     <div class="col">
+       <h4>Pretty B (editable)</h4>
+       <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
+      <div id="errorB" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
+       <div class="controls">
+         <input type="file" id="fileB" accept="application/json" />
+         <button id="fmtB">格式化 B</button>
+         <button id="clearB">清空 B</button>
+         <button id="dlB">下载 B</button>
+       </div>
+     </div>
+   </div>
 
   <div style="margin-top:18px">
     <h4>Diff (ASCII)</h4>
@@ -69,7 +71,34 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
 // helpers
 function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); }; }
 function prettyTry(text){ try{ const j = JSON.parse(text); return JSON.stringify(j, null, 2); }catch(e){ return text; } }
-function short(v){ try{ return JSON.stringify(v); }catch(e){ return String(v); } }
+function clientParseError(text){ try{ JSON.parse(text); return null; } catch(e){ return { message: e.message }; } }
+
+function showParseError(side, err){
+  const el = side === 'A' ? document.getElementById('errorA') : document.getElementById('errorB');
+  if(!err){ el.style.display='none'; el.textContent=''; return; }
+  let msg = err.message || String(err);
+  if(err.line){ msg += ' (line: '+err.line + (err.column? ', col: '+err.column : '') +')'; }
+  // clickable jump if line available
+  if(err.line){ el.innerHTML = '<strong>JSON 解析错误：</strong>' + msg + ' <a href="#" onclick="(function(){ jumpToLineInTextarea('+(side==='A'?'ta':'tb')+','+err.line+'); return false; })()">跳转到行</a>'; }
+  else { el.textContent = 'JSON 解析错误：' + msg; }
+  el.style.display = 'block';
+}
+
+function clearParseError(side){ const el = side === 'A' ? document.getElementById('errorA') : document.getElementById('errorB'); el.style.display='none'; el.textContent=''; }
+
+function jumpToLineInTextarea(textarea, line){
+  const text = textarea.value || '';
+  const lines = text.split('\n');
+  const idx = Math.max(1, Math.min(line, lines.length)) - 1;
+  let start = 0;
+  for(let i=0;i<idx;i++) start += lines[i].length + 1; // include \n
+  let end = start + lines[idx].length;
+  textarea.focus();
+  textarea.setSelectionRange(start, end);
+  // scroll
+  const lineHeight = 18;
+  textarea.scrollTop = Math.max(0, idx * lineHeight - 40);
+}
 
 async function loadFileInput(el, targetTextarea){ if(!el.files[0]) return; const txt = await el.files[0].text(); targetTextarea.value = txt; targetTextarea.dispatchEvent(new Event('input')); }
 
@@ -103,6 +132,16 @@ async function compare(){
   const aText = ta.value;
   const bText = tb.value;
   if(aText.trim()==='' || bText.trim()==='') return;
+
+  // client-side parse check
+  const cErrA = clientParseError(aText);
+  const cErrB = clientParseError(bText);
+  if(cErrA){ showParseError('A', cErrA); }
+  else { clearParseError('A'); }
+  if(cErrB){ showParseError('B', cErrB); }
+  else { clearParseError('B'); }
+  if(cErrA || cErrB){ diffEl.textContent = 'JSON 解析错误，请修复后再比较'; diffTable.style.display='none'; noDiff.style.display='block'; return; }
+
   diffEl.textContent = '比较中...';
   const fd = new FormData();
   fd.append('fileA', new Blob([aText], {type:'application/json'}), 'a.json');
@@ -114,6 +153,12 @@ async function compare(){
     // show pretty versions (server may have normalized)
     if(j.prettyA) ta.value = j.prettyA;
     if(j.prettyB) tb.value = j.prettyB;
+    // server parse errors
+    if(j.errorA){ showParseError('A', j.errorA); }
+    else { clearParseError('A'); }
+    if(j.errorB){ showParseError('B', j.errorB); }
+    else { clearParseError('B'); }
+    if(j.errorA || j.errorB){ diffEl.textContent = '服务端解析错误，已显示在相应面板'; diffTable.style.display='none'; noDiff.style.display='block'; window._last = j; return; }
     diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --';
     renderDiffList(j.diffList || []);
     window._last = j;
