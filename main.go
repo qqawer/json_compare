@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -177,31 +178,13 @@ func generateDiffList(a, b []byte) ([]DiffItem, error) {
 	return out, nil
 }
 
-func compareHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		http.Error(w, "parse error", http.StatusBadRequest)
-		return
-	}
-	readPart := func(key string) []byte {
-		f, _, err := r.FormFile(key)
-		if err == nil && f != nil {
-			defer f.Close()
-			b, _ := io.ReadAll(f)
-			return b
-		}
-		// try plain field
-		if v := r.FormValue(key); v != "" {
-			return []byte(v)
-		}
-		return []byte("{}")
-	}
-	a := readPart("fileA")
-	b := readPart("fileB")
+func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
+	a := []byte(aText)
+	b := []byte(bText)
 
 	prettyA := prettyJSON(a)
 	prettyB := prettyJSON(b)
 
-	// detect parse errors
 	errA := parseErrorFor(a)
 	errB := parseErrorFor(b)
 
@@ -209,28 +192,63 @@ func compareHandler(w http.ResponseWriter, r *http.Request) {
 	asciiStr := ""
 	patchStr := ""
 	var dList []DiffItem
+	identical := false
 
 	// only compute diffs when both sides parsed OK
 	if errA == nil && errB == nil {
-		differ := gojsondiff.New()
-		delta, err := differ.Compare(a, b)
-		if err != nil {
-			http.Error(w, "compare error: "+err.Error(), http.StatusInternalServerError)
-			return
+		// decode with UseNumber to preserve numeric forms
+		var av, bv interface{}
+		decA := json.NewDecoder(bytes.NewReader(a))
+		decA.UseNumber()
+		if err := decA.Decode(&av); err != nil {
+			return nil, err
+		}
+		decB := json.NewDecoder(bytes.NewReader(b))
+		decB.UseNumber()
+		if err := decB.Decode(&bv); err != nil {
+			return nil, err
 		}
 
-		var base interface{}
-		_ = json.Unmarshal(a, &base)
+		// detect semantic equality
+		if reflect.DeepEqual(av, bv) {
+			identical = true
+			// leave asciiStr empty
+		} else {
+			// determine structured vs primitive
+			isStructured := func(v interface{}) bool {
+				switch v.(type) {
+				case map[string]interface{}, []interface{}:
+					return true
+				default:
+					return false
+				}
+			}
 
-		asciiCfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: false}
-		af := formatter.NewAsciiFormatter(base, asciiCfg)
-		asciiStr, _ = af.Format(delta)
+			if isStructured(av) && isStructured(bv) {
+				// both structured; use gojsondiff
+				differ := gojsondiff.New()
+				delta, err := differ.Compare(a, b)
+				if err != nil {
+					return nil, err
+				}
+				var base interface{}
+				_ = json.Unmarshal(a, &base)
 
-		deltaFmt := formatter.NewDeltaFormatter()
-		patchStr, _ = deltaFmt.Format(delta)
+				asciiCfg := formatter.AsciiFormatterConfig{ShowArrayIndex: true, Coloring: false}
+				af := formatter.NewAsciiFormatter(base, asciiCfg)
+				asciiStr, _ = af.Format(delta)
 
-		// structured diff list
-		dList, _ = generateDiffList(a, b)
+				deltaFmt := formatter.NewDeltaFormatter()
+				patchStr, _ = deltaFmt.Format(delta)
+
+				// structured diff list
+				dList, _ = generateDiffList(a, b)
+			} else {
+				// mixed types or primitives: create a simple diff
+				asciiStr = fmt.Sprintf("- %v\n+ %v\n", av, bv)
+				dList = []DiffItem{{Path: "$", Type: "modified", A: av, B: bv}}
+			}
+		}
 	}
 
 	resp := map[string]interface{}{
@@ -239,12 +257,100 @@ func compareHandler(w http.ResponseWriter, r *http.Request) {
 		"asciiDiff": asciiStr,
 		"patch":     patchStr,
 		"diffList":  dList,
+		"identical": identical,
 	}
 	if errA != nil { resp["errorA"] = errA }
 	if errB != nil { resp["errorB"] = errB }
+	return resp, nil
+}
+
+func compareHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("--- /compare start ---")
+	fmt.Println("remote:", r.RemoteAddr, "method:", r.Method, "content-type:", r.Header.Get("Content-Type"), "content-length:", r.ContentLength)
+
+	// CORS
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// recover from panic and return JSON error
+	writeJSONError := func(status int, msg string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+		fmt.Println("compareHandler error:", status, msg)
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			writeJSONError(http.StatusInternalServerError, fmt.Sprintf("panic: %v", rec))
+			fmt.Println("panic stack:")
+		}
+	}()
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		fmt.Println("ParseMultipartForm error:", err)
+		writeJSONError(http.StatusBadRequest, "parse error: "+err.Error())
+		return
+	}
+
+	readPart := func(key string) string {
+		f, _, err := r.FormFile(key)
+		if err == nil && f != nil {
+			defer f.Close()
+			b, err := io.ReadAll(f)
+			if err != nil {
+				fmt.Println("readPart read error:", key, err)
+				return ""
+			}
+			fmt.Println("readPart: read file", key, "len=", len(b))
+			return string(b)
+		}
+		if err != nil && err != http.ErrMissingFile {
+			// log but continue to try FormValue
+			fmt.Println("readPart FormFile error for", key, err)
+		}
+		if v := r.FormValue(key); v != "" {
+			fmt.Println("readPart: form value", key, "len=", len(v))
+			return v
+		}
+		return ""
+	}
+
+	a := readPart("fileA")
+	b := readPart("fileB")
+	fmt.Println("payload lengths: A=", len(a), "B=", len(b))
+
+	res, err := doCompareTexts(a, b)
+	if err != nil {
+		fmt.Println("doCompareTexts error:", err)
+		writeJSONError(http.StatusInternalServerError, "compare error: "+err.Error())
+		return
+	}
+
+	// if server-side parse errors detected, return 400 with error details
+	if _, ok := res["errorA"]; ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(res)
+		fmt.Println("--- /compare parse error (A) ---")
+		return
+	}
+	if _, ok := res["errorB"]; ok {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(res)
+		fmt.Println("--- /compare parse error (B) ---")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_ = json.NewEncoder(w).Encode(res)
+	fmt.Println("--- /compare ok ---")
 }
 
 func main() {
