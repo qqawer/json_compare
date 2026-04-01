@@ -73,6 +73,21 @@ function debounce(fn, wait){ let t; return (...a)=>{ clearTimeout(t); t=setTimeo
 function prettyTry(text){ try{ const j = JSON.parse(text); return JSON.stringify(j, null, 2); }catch(e){ return text; } }
 function clientParseError(text){ try{ JSON.parse(text); return null; } catch(e){ return { message: e.message }; } }
 
+// short: safely stringify and truncate long values for table display
+function short(v){
+  try{
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'string'){
+      return v.length > 120 ? v.slice(0,120) + '…' : v;
+    }
+    // numbers/booleans
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    // objects/arrays
+    const s = JSON.stringify(v);
+    return s.length > 120 ? s.slice(0,120) + '…' : s;
+  }catch(e){ return String(v); }
+}
+
 function showParseError(side, err){
   const el = side === 'A' ? document.getElementById('errorA') : document.getElementById('errorB');
   if(!err){ el.style.display='none'; el.textContent=''; return; }
@@ -148,21 +163,35 @@ async function compare(){
   fd.append('fileB', new Blob([bText], {type:'application/json'}), 'b.json');
   try{
     const res = await fetch('/compare', { method:'POST', body: fd });
-    if(!res.ok){ diffEl.textContent = '服务器错误'; return; }
+    if(!res.ok){
+      // try to parse error body
+      let errText = '服务器错误';
+      try{ const errBody = await res.text(); errText = '服务器错误: ' + errBody }catch(e){}
+      diffEl.textContent = errText;
+      return;
+    }
     const j = await res.json();
-    // show pretty versions (server may have normalized)
-    if(j.prettyA) ta.value = j.prettyA;
-    if(j.prettyB) tb.value = j.prettyB;
     // server parse errors
-    if(j.errorA){ showParseError('A', j.errorA); }
-    else { clearParseError('A'); }
-    if(j.errorB){ showParseError('B', j.errorB); }
-    else { clearParseError('B'); }
+    if(j.errorA){ showParseError('A', j.errorA); } else { clearParseError('A'); }
+    if(j.errorB){ showParseError('B', j.errorB); } else { clearParseError('B'); }
     if(j.errorA || j.errorB){ diffEl.textContent = '服务端解析错误，已显示在相应面板'; diffTable.style.display='none'; noDiff.style.display='block'; window._last = j; return; }
+    // 保存服务器格式化结果但不要覆盖用户编辑区
+    window._serverPretty = { prettyA: j.prettyA, prettyB: j.prettyB };
+    // only render diff if both panes non-empty
+    if((ta.value||'').trim() === '' || (tb.value||'').trim() === ''){
+      diffEl.textContent = '-- 比较结果将在这里显示 --';
+      diffTable.style.display='none'; noDiff.style.display='block';
+      return;
+    }
+    if(j.identical){
+      diffEl.textContent = '-- 两边语义相同 --';
+      diffTable.style.display='none'; noDiff.style.display='block';
+      window._last = j; return;
+    }
     diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --';
     renderDiffList(j.diffList || []);
     window._last = j;
-  }catch(e){ diffEl.textContent = '比较失败: '+e.message; }
+  }catch(e){ console.error('compare error', e); diffEl.textContent = '比较失败: '+e.message; }
 }
 
 function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length===0){ diffTable.style.display='none'; noDiff.style.display='block'; return; }
