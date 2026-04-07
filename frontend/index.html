@@ -62,7 +62,8 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
     </div>
 
     <div style="margin-top:12px">
-      <button id="dlPatch">下载 Patch</button>
+      <button id="dlPatchReadable">下载 Patch（可读，含旧值）</button>
+      <button id="dlPatchRFC">下载 Patch（RFC-6902）</button>
       <button id="forceCompare">强制比较</button>
     </div>
   </div>
@@ -258,7 +259,20 @@ function jumpToTokenInTextarea(textarea, token){
 
 function dl(filename, text){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text||''],{type:'application/json'})); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); }
 
-document.getElementById('dlPatch').addEventListener('click', ()=> dl('patch.json', (window._last||{}).patch || ''));
+document.getElementById('dlPatchReadable').addEventListener('click', ()=> {
+  const last = window._last || {};
+  const contents = last.rfc6902Patch || last.rfc6902PatchAnnotated || last.patch || '';
+  dl('patch-readable.json', contents);
+});
+
+document.getElementById('dlPatchRFC').addEventListener('click', ()=> {
+  const last = window._last || {};
+  const contents = last.rfc6902PatchRFC || last.rfc6902Patch || last.patch || '';
+  dl('patch-rfc6902.json', contents);
+});
+
+// remove old single-button listener if present
+document.getElementById('dlPatch')?.removeEventListener('click', dlPatchHandler);
 
 // if initial contents exist, compare once
 maybeCompare();

@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/yudai/gojsondiff"
 	"github.com/yudai/gojsondiff/formatter"
@@ -178,6 +179,24 @@ func generateDiffList(a, b []byte) ([]DiffItem, error) {
 	return out, nil
 }
 
+func pathToJSONPointer(p string) string {
+	// our paths look like $.a.b[2].c -> convert to /a/b/2/c
+	if p == "$" || p == "$." || p == "" {
+		return "" // pointer to whole document
+	}
+	// strip leading $. or $
+	p = strings.TrimPrefix(p, "$")
+	p = strings.TrimPrefix(p, ".")
+	// replace [index] with /index and . with /
+	p = strings.ReplaceAll(p, ".", "/")
+	p = strings.ReplaceAll(p, "[", "/")
+	p = strings.ReplaceAll(p, "]", "")
+	// escape ~ and /
+	p = strings.ReplaceAll(p, "~", "~0")
+	p = strings.ReplaceAll(p, "/", "~1")
+	return "/" + p
+}
+
 func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 	a := []byte(aText)
 	b := []byte(bText)
@@ -259,6 +278,43 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 		"diffList":  dList,
 		"identical": identical,
 	}
+
+	// Build a simple RFC-6902 style patch from our structured diff list when possible
+	if errA == nil && errB == nil {
+		if len(dList) > 0 {
+			ops := make([]map[string]interface{}, 0, len(dList))
+			opsAnn := make([]map[string]interface{}, 0, len(dList))
+			for _, di := range dList {
+				p := pathToJSONPointer(di.Path)
+				switch di.Type {
+				case "added":
+					ops = append(ops, map[string]interface{}{"op": "add", "path": p, "value": di.B})
+					opsAnn = append(opsAnn, map[string]interface{}{"op": "add", "path": p, "value": di.B})
+				case "removed":
+					ops = append(ops, map[string]interface{}{"op": "remove", "path": p})
+					opsAnn = append(opsAnn, map[string]interface{}{"op": "remove", "path": p, "old": di.A})
+				case "modified":
+					ops = append(ops, map[string]interface{}{"op": "replace", "path": p, "value": di.B})
+					opsAnn = append(opsAnn, map[string]interface{}{"op": "replace", "path": p, "old": di.A, "value": di.B})
+				}
+			}
+			if pjBytes, err := json.MarshalIndent(ops, "", "  "); err == nil {
+				// keep strict RFC-6902 patch for programmatic application
+				resp["rfc6902PatchRFC"] = string(pjBytes)
+			} else {
+				fmt.Println("marshal rfc6902 patch error:", err)
+				resp["rfc6902PatchError"] = fmt.Sprintf("marshal patch error: %v", err)
+			}
+			// annotated patch (old + new) placed into rfc6902Patch so downloads show before/after
+			if pjAnn, err := json.MarshalIndent(opsAnn, "", "  "); err == nil {
+				resp["rfc6902Patch"] = string(pjAnn)
+				resp["rfc6902PatchAnnotated"] = string(pjAnn)
+			} else {
+				fmt.Println("marshal annotated patch error:", err)
+			}
+		}
+	}
+
 	if errA != nil { resp["errorA"] = errA }
 	if errB != nil { resp["errorB"] = errB }
 	return resp, nil
