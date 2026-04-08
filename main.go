@@ -414,7 +414,10 @@ func main() {
 	http.Handle("/", fs)
 	http.HandleFunc("/compare", compareHandler)
 
-	port := "8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8090"
+	}
 	fmt.Println("listening on http://localhost:" + port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		fmt.Fprintln(os.Stderr, err)
