@@ -179,6 +179,78 @@ func generateDiffList(a, b []byte) ([]DiffItem, error) {
 	return out, nil
 }
 
+// countLeaves returns the number of leaf (primitive) nodes under v.
+func countLeaves(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	switch vv := v.(type) {
+	case map[string]interface{}:
+		cnt := 0
+		for _, val := range vv {
+			cnt += countLeaves(val)
+		}
+		return cnt
+	case []interface{}:
+		cnt := 0
+		for _, el := range vv {
+			cnt += countLeaves(el)
+		}
+		return cnt
+	default:
+		return 1
+	}
+}
+
+// countLeavesUnion counts leaf positions in the union of a and b (used to compute total compared fields).
+func countLeavesUnion(a, b interface{}) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return countLeaves(b)
+	}
+	if b == nil {
+		return countLeaves(a)
+	}
+
+	// both present
+	switch av := a.(type) {
+	case map[string]interface{}:
+		if bv, ok := b.(map[string]interface{}); ok {
+			keys := map[string]struct{}{}
+			for k := range av {
+				keys[k] = struct{}{}
+			}
+			for k := range bv {
+				keys[k] = struct{}{}
+			}
+			cnt := 0
+			for k := range keys {
+				cnt += countLeavesUnion(av[k], bv[k])
+			}
+			return cnt
+		}
+	case []interface{}:
+		if bv, ok := b.([]interface{}); ok {
+			max := len(av)
+			if len(bv) > max {
+				max = len(bv)
+			}
+			cnt := 0
+			for i := 0; i < max; i++ {
+				var aa, bb interface{}
+				if i < len(av) { aa = av[i] }
+				if i < len(bv) { bb = bv[i] }
+				cnt += countLeavesUnion(aa, bb)
+			}
+			return cnt
+		}
+	}
+	// differing types or primitives: treat as single leaf
+	return 1
+}
+
 func pathToJSONPointer(p string) string {
 	// our paths look like $.a.b[2].c -> convert to /a/b/2/c
 	if p == "$" || p == "$." || p == "" {
@@ -313,6 +385,49 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 				fmt.Println("marshal annotated patch error:", err)
 			}
 		}
+	}
+
+	// compute statistics for diffs: totals and metrics
+	if errA == nil && errB == nil {
+		// compute counts
+		added := 0
+		removed := 0
+		modified := 0
+		for _, di := range dList {
+			switch di.Type {
+			case "added": added++
+			case "removed": removed++
+			case "modified": modified++
+			}
+		}
+		totalDiffs := len(dList)
+
+		// parse both into generic values to count total compared leaves
+		var av, bv interface{}
+		_ = json.Unmarshal(a, &av)
+		_ = json.Unmarshal(b, &bv)
+		totalCompared := countLeavesUnion(av, bv)
+		if totalCompared == 0 { totalCompared = 0 }
+
+		accuracy := 1.0
+		if totalCompared > 0 {
+			accuracy = float64(totalCompared-totalDiffs) / float64(totalCompared)
+		}
+		precision := 1.0
+		if totalDiffs > 0 {
+			precision = float64(modified) / float64(totalDiffs)
+		}
+
+		stats := map[string]interface{}{
+			"totalCompared": totalCompared,
+			"totalDiffs":    totalDiffs,
+			"added":         added,
+			"removed":       removed,
+			"modified":      modified,
+			"accuracy":      accuracy,
+			"precision":     precision,
+		}
+		resp["stats"] = stats
 	}
 
 	if errA != nil { resp["errorA"] = errA }

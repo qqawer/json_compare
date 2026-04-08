@@ -61,12 +61,21 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
       <div id="noDiff" class="small">暂无差异或尚未比较</div>
     </div>
 
+    <!-- Statistics: counts and metrics -->
+    <div id="statsArea" style="margin-top:12px; display:none;">
+      <h4>Comparison statistics</h4>
+      <div id="statsContainer" class="small" style="padding:8px; border:1px solid #eee; background:#fafafa; max-width:480px;"></div>
+      <div style="margin-top:6px">
+        <button id="dlStats">下载 统计 数据（JSON）</button>
+      </div>
+    </div>
+
     <div style="margin-top:12px">
       <button id="dlPatchReadable">下载 Patch（可读，含旧值）</button>
       <button id="dlPatchRFC">下载 Patch（RFC-6902）</button>
       <button id="forceCompare">强制比较</button>
     </div>
-  </div>
+   </div>
 
 <script>
 // helpers
@@ -187,15 +196,19 @@ async function compare(){
     if(j.identical){
       diffEl.textContent = '-- 两边语义相同 --';
       diffTable.style.display='none'; noDiff.style.display='block';
+      renderStats(j.stats || null);
       window._last = j; return;
     }
     diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --';
     renderDiffList(j.diffList || []);
+    renderStats(j.stats || null);
     window._last = j;
   }catch(e){ console.error('compare error', e); diffEl.textContent = '比较失败: '+e.message; }
 }
 
-function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length===0){ diffTable.style.display='none'; noDiff.style.display='block'; return; }
+function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length===0){ diffTable.style.display='none'; noDiff.style.display='block'; // hide stats
+  document.getElementById('statsArea').style.display = 'none';
+    return; }
   noDiff.style.display='none'; diffTable.style.display='table';
   list.forEach(item=>{
     const tr = document.createElement('tr');
@@ -214,61 +227,24 @@ function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length=
   });
 }
 
-// try to jump to a token (last key or array index) in both textareas
-function jumpToPathInPanes(path){
-  // derive token: last key name or index
-  if(!path) return;
-  // remove leading $. and split by . and []
-  let token = path.replace(/^\$\.?/, '');
-  // get last segment after dot
-  const parts = token.split('.');
-  token = parts[parts.length-1] || token;
-  // strip array indexes if present, e.g. items[3] -> items or [3] -> 3
-  const m = token.match(/^(.*)\[(\d+)\]$/);
-  if(m){ token = m[1] || m[2]; }
-  token = token.replace(/\[|\]|"/g, '').trim();
-  if(!token) token = path; // fallback
-  // try A first, then B
-  if(!jumpToTokenInTextarea(ta, token)){
-    jumpToTokenInTextarea(tb, token);
-  }
+function renderStats(stats){
+  const area = document.getElementById('statsArea');
+  if(!stats){ area.style.display = 'none'; return; }
+  area.style.display = 'block';
+  const c = stats;
+  const acc = (typeof c.accuracy === 'number') ? (c.accuracy*100).toFixed(2) + '%' : c.accuracy;
+  const prec = (typeof c.precision === 'number') ? (c.precision*100).toFixed(2) + '%' : c.precision;
+  const html = [`<div><strong>Total compared:</strong> ${c.totalCompared || 0}</div>`,
+                `<div><strong>Total diffs:</strong> ${c.totalDiffs || 0}</div>`,
+                `<div><strong>Added:</strong> ${c.added || 0} &nbsp; <strong>Removed:</strong> ${c.removed || 0} &nbsp; <strong>Modified:</strong> ${c.modified || 0}</div>`,
+                `<div><strong>Accuracy:</strong> ${acc} &nbsp; <strong>Precision:</strong> ${prec}</div>`].join('');
+  document.getElementById('statsContainer').innerHTML = html;
 }
 
-function jumpToTokenInTextarea(textarea, token){
-  const txt = textarea.value;
-  if(!txt || !token) return false;
-  // try searching for "token" or token with quotes
-  const q1 = '"' + token + '"';
-  let idx = txt.indexOf(q1);
-  if(idx === -1) idx = txt.indexOf(token);
-  if(idx === -1) return false;
-  // select the whole line containing idx
-  let start = txt.lastIndexOf('\n', idx);
-  start = start === -1 ? 0 : start + 1;
-  let end = txt.indexOf('\n', idx);
-  end = end === -1 ? txt.length : end;
-  textarea.focus();
-  textarea.setSelectionRange(start, end);
-  // scroll to the selection: compute line number and approximate scroll
-  const before = txt.slice(0, start);
-  const lineNumber = (before.match(/\n/g)||[]).length;
-  const lineHeight = 18; // approximate
-  textarea.scrollTop = Math.max(0, lineNumber*lineHeight - 40);
-  return true;
-}
-
-function dl(filename, text){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text||''],{type:'application/json'})); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); }
-
-document.getElementById('dlPatchReadable').addEventListener('click', ()=> {
+document.getElementById('dlStats').addEventListener('click', ()=>{
   const last = window._last || {};
-  const contents = last.rfc6902Patch || last.rfc6902PatchAnnotated || last.patch || '';
-  dl('patch-readable.json', contents);
-});
-
-document.getElementById('dlPatchRFC').addEventListener('click', ()=> {
-  const last = window._last || {};
-  const contents = last.rfc6902PatchRFC || last.rfc6902Patch || last.patch || '';
-  dl('patch-rfc6902.json', contents);
+  const contents = last.stats ? JSON.stringify(last.stats, null, 2) : '{}';
+  dl('compare-stats.json', contents);
 });
 
 // remove old single-button listener if present
