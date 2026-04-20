@@ -247,8 +247,62 @@ document.getElementById('dlStats').addEventListener('click', ()=>{
   dl('compare-stats.json', contents);
 });
 
-// remove old single-button listener if present
-document.getElementById('dlPatch')?.removeEventListener('click', dlPatchHandler);
+// download helper used by the UI
+function dl(filename, contents, mime='application/json'){
+  const blob = new Blob([contents], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+// Patch download buttons: include stats together with the patch
+function parseMaybeJSON(s){
+  if(typeof s !== 'string') return s;
+  // quick check: if it already looks like JSON (starts with [ or {) try parse directly
+  const trimmed = s.trim();
+  if(trimmed.startsWith('{') || trimmed.startsWith('[')){
+    try{ return JSON.parse(trimmed); }catch(e){}
+  }
+  // if it's a quoted string (starts and ends with ") strip outer quotes
+  let candidate = s;
+  if(candidate.length >= 2 && candidate[0] === '"' && candidate[candidate.length-1] === '"'){
+    candidate = candidate.slice(1, -1);
+  }
+  // replace common escaped sequences to turn into valid JSON text
+  candidate = candidate.replace(/\\n/g, '\n');
+  candidate = candidate.replace(/\\r/g, '\r');
+  candidate = candidate.replace(/\\t/g, '\t');
+  candidate = candidate.replace(/\\\"/g, '"');
+  // try parse
+  try{ return JSON.parse(candidate); }catch(e){
+    // as last resort, try to eval as JS (not ideal) — avoid for security, so fallback to original string
+    return s;
+  }
+}
+
+document.getElementById('dlPatchReadable').addEventListener('click', ()=>{
+  const last = window._last || {};
+  let readablePatch = last.rfc6902Patch || last.patch || [];
+  readablePatch = parseMaybeJSON(readablePatch);
+  const out = { readablePatch: readablePatch, stats: last.stats || {} };
+  dl('patch-readable-with-stats.json', JSON.stringify(out, null, 2));
+});
+
+document.getElementById('dlPatchRFC').addEventListener('click', ()=>{
+  const last = window._last || {};
+  let rfcPatch = last.rfc6902PatchRFC || last.rfc6902Patch || last.patch || [];
+  rfcPatch = parseMaybeJSON(rfcPatch);
+  const out = { patch: rfcPatch, stats: last.stats || {} };
+  dl('patch-rfc6902-with-stats.json', JSON.stringify(out, null, 2));
+});
+
+// no-op for old single-button listener removal (kept intentionally removed)
+// document.getElementById('dlPatch')?.removeEventListener('click', dlPatchHandler);
 
 // if initial contents exist, compare once
 maybeCompare();

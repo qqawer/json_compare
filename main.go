@@ -370,17 +370,19 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 					opsAnn = append(opsAnn, map[string]interface{}{"op": "replace", "path": p, "old": di.A, "value": di.B})
 				}
 			}
+			// expose patches as structured objects (not strings) so clients can pretty-print and download
+			resp["rfc6902PatchRFC"] = ops
+			resp["rfc6902Patch"] = opsAnn
+			resp["rfc6902PatchAnnotated"] = opsAnn
+			// also include pretty-printed string forms for backward compatibility
 			if pjBytes, err := json.MarshalIndent(ops, "", "  "); err == nil {
-				// keep strict RFC-6902 patch for programmatic application
-				resp["rfc6902PatchRFC"] = string(pjBytes)
+				resp["rfc6902PatchRFCString"] = string(pjBytes)
 			} else {
 				fmt.Println("marshal rfc6902 patch error:", err)
 				resp["rfc6902PatchError"] = fmt.Sprintf("marshal patch error: %v", err)
 			}
-			// annotated patch (old + new) placed into rfc6902Patch so downloads show before/after
 			if pjAnn, err := json.MarshalIndent(opsAnn, "", "  "); err == nil {
-				resp["rfc6902Patch"] = string(pjAnn)
-				resp["rfc6902PatchAnnotated"] = string(pjAnn)
+				resp["rfc6902PatchString"] = string(pjAnn)
 			} else {
 				fmt.Println("marshal annotated patch error:", err)
 			}
@@ -413,9 +415,15 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 		if totalCompared > 0 {
 			accuracy = float64(totalCompared-totalDiffs) / float64(totalCompared)
 		}
+
+		// precision: use standard formula precision = TP / (TP + FP)
+		// where TP = totalCompared - totalDiffs (matching leaves),
+		// and FP = added + modified (diffs counted as false positives per spec)
+		TP := totalCompared - totalDiffs
+		FP := added + modified
 		precision := 1.0
-		if totalDiffs > 0 {
-			precision = float64(modified) / float64(totalDiffs)
+		if TP+FP > 0 {
+			precision = float64(TP) / float64(TP+FP)
 		}
 
 		stats := map[string]interface{}{
