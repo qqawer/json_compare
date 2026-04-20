@@ -142,6 +142,17 @@ git add Dockerfile build_and_push_multiarch.sh push_to_dockerhub.sh main.go fron
 git commit -m "chore: docker + ci scripts; server/frontend updates for patch downloads" 
 ```
 
----
+## 新增选项：忽略空白差异（ignoreWhitespace）
 
-如果你希望我把 `PUBLISH.md` 提交到仓库并生成这些分离或合并的 commit，我可以帮你执行（请确认是否要把修改拆成多个 commit 或一次性提交）。
+为了减少因换行或多空格导致的噪声差异，前端增加了一个“忽略空白差异”开关（默认开启）。该选项会在比较字符串时折叠连续空白（包括换行、制表和多个空格）为单个空格再进行比较，从而把仅因格式化不同而造成的差异视为相同。
+
+- 前端 UI：在主页面 `frontend/index.html` 顶部控制区可见复选框 `忽略空白差异（默认开启）`，用户可以随时切换。
+- 后端 API：在 POST `/compare` 时，表单字段 `ignoreWhitespace` 会被发送（默认值 `true`）。示例 FormData（前端自动发送）：
+
+```text
+fileA: <file or text>
+fileB: <file or text>
+ignoreWhitespace: true
+```
+
+- 注意事项：折叠空白会丢失某些多行文本的语义（例如段落分隔、日志或诗歌），因此该选项是可配置的。如果你希望保持换行敏感，请在页面取消勾选该复选框。
