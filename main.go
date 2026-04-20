@@ -87,7 +87,13 @@ func joinPath(path, key string) string {
 	return path + "." + key
 }
 
-func compareValues(path string, a, b interface{}, out *[]DiffItem) {
+func normalizeStringForCompare(s string) string {
+	// collapse all whitespace (spaces, tabs, newlines) into single space and trim
+	parts := strings.Fields(s)
+	return strings.Join(parts, " ")
+}
+
+func compareValues(path string, a, b interface{}, out *[]DiffItem, ignoreWhitespace bool) {
 	// both nil
 	if a == nil && b == nil {
 		return
@@ -124,7 +130,7 @@ func compareValues(path string, a, b interface{}, out *[]DiffItem) {
 			var aa, bb interface{}
 			if v, ok := av[k]; ok { aa = v }
 			if v, ok := bv[k]; ok { bb = v }
-			compareValues(pa, aa, bb, out)
+			compareValues(pa, aa, bb, out, ignoreWhitespace)
 		}
 	case []interface{}:
 		bv, ok := b.([]interface{})
@@ -138,7 +144,7 @@ func compareValues(path string, a, b interface{}, out *[]DiffItem) {
 		}
 		for i := 0; i < min; i++ {
 			pa := path + "[" + strconv.Itoa(i) + "]"
-			compareValues(pa, av[i], bv[i], out)
+			compareValues(pa, av[i], bv[i], out, ignoreWhitespace)
 		}
 		if len(av) > len(bv) {
 			for i := min; i < len(av); i++ {
@@ -153,13 +159,27 @@ func compareValues(path string, a, b interface{}, out *[]DiffItem) {
 		}
 	default:
 		// primitives
+		// if both are strings and ignoreWhitespace is enabled, normalize before comparing
+		if sa, okA := a.(string); okA {
+			if sb, okB := b.(string); okB {
+				if ignoreWhitespace {
+					if normalizeStringForCompare(sa) == normalizeStringForCompare(sb) {
+						return
+					}
+				} else {
+					if sa == sb {
+						return
+					}
+				}
+			}
+		}
 		if !reflect.DeepEqual(a, b) {
 			*out = append(*out, DiffItem{Path: path, Type: "modified", A: a, B: b})
 		}
 	}
 }
 
-func generateDiffList(a, b []byte) ([]DiffItem, error) {
+func generateDiffList(a, b []byte, ignoreWhitespace bool) ([]DiffItem, error) {
 	var av, bv interface{}
 	if err := json.Unmarshal(a, &av); err != nil {
 		// if invalid, treat as text
@@ -175,101 +195,11 @@ func generateDiffList(a, b []byte) ([]DiffItem, error) {
 		return []DiffItem{{Path: "$", Type: "modified", A: av, B: string(b)}}, nil
 	}
 	var out []DiffItem
-	compareValues("$", av, bv, &out)
+	compareValues("$", av, bv, &out, ignoreWhitespace)
 	return out, nil
 }
 
-// countLeaves returns the number of leaf (primitive) nodes under v.
-func countLeaves(v interface{}) int {
-	if v == nil {
-		return 0
-	}
-	switch vv := v.(type) {
-	case map[string]interface{}:
-		cnt := 0
-		for _, val := range vv {
-			cnt += countLeaves(val)
-		}
-		return cnt
-	case []interface{}:
-		cnt := 0
-		for _, el := range vv {
-			cnt += countLeaves(el)
-		}
-		return cnt
-	default:
-		return 1
-	}
-}
-
-// countLeavesUnion counts leaf positions in the union of a and b (used to compute total compared fields).
-func countLeavesUnion(a, b interface{}) int {
-	if a == nil && b == nil {
-		return 0
-	}
-	if a == nil {
-		return countLeaves(b)
-	}
-	if b == nil {
-		return countLeaves(a)
-	}
-
-	// both present
-	switch av := a.(type) {
-	case map[string]interface{}:
-		if bv, ok := b.(map[string]interface{}); ok {
-			keys := map[string]struct{}{}
-			for k := range av {
-				keys[k] = struct{}{}
-			}
-			for k := range bv {
-				keys[k] = struct{}{}
-			}
-			cnt := 0
-			for k := range keys {
-				cnt += countLeavesUnion(av[k], bv[k])
-			}
-			return cnt
-		}
-	case []interface{}:
-		if bv, ok := b.([]interface{}); ok {
-			max := len(av)
-			if len(bv) > max {
-				max = len(bv)
-			}
-			cnt := 0
-			for i := 0; i < max; i++ {
-				var aa, bb interface{}
-				if i < len(av) { aa = av[i] }
-				if i < len(bv) { bb = bv[i] }
-				cnt += countLeavesUnion(aa, bb)
-			}
-			return cnt
-		}
-	}
-	// differing types or primitives: treat as single leaf
-	return 1
-}
-
-func pathToJSONPointer(p string) string {
-	// our paths look like $.a.b[2].c -> convert to /a/b/2/c
-	if p == "$" || p == "$." || p == "" {
-		return "" // pointer to whole document
-	}
-	// strip leading $. or $
-	p = strings.TrimPrefix(p, "$")
-	p = strings.TrimPrefix(p, ".")
-	// replace [index] with /index and . with /
-	p = strings.ReplaceAll(p, ".", "/")
-	p = strings.ReplaceAll(p, "[", "/")
-	p = strings.ReplaceAll(p, "]", "")
-	// escape ~ and /
-	p = strings.ReplaceAll(p, "~", "~0")
-	p = strings.ReplaceAll(p, "/", "~1")
-	return "/" + p
-}
-
-func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
+func doCompareTexts(aText, bText string, ignoreWhitespace bool) (map[string]interface{}, error) {
 	a := []byte(aText)
 	b := []byte(bText)
 
@@ -333,7 +263,7 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 				patchStr, _ = deltaFmt.Format(delta)
 
 				// structured diff list
-				dList, _ = generateDiffList(a, b)
+				dList, _ = generateDiffList(a, b, ignoreWhitespace)
 			} else {
 				// mixed types or primitives: create a simple diff
 				asciiStr = fmt.Sprintf("- %v\n+ %v\n", av, bv)
@@ -443,6 +373,96 @@ func doCompareTexts(aText, bText string) (map[string]interface{}, error) {
 	return resp, nil
 }
 
+// countLeaves returns the number of leaf (primitive) nodes under v.
+func countLeaves(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	switch vv := v.(type) {
+	case map[string]interface{}:
+		cnt := 0
+		for _, val := range vv {
+			cnt += countLeaves(val)
+		}
+		return cnt
+	case []interface{}:
+		cnt := 0
+		for _, el := range vv {
+			cnt += countLeaves(el)
+		}
+		return cnt
+	default:
+		return 1
+	}
+}
+
+// countLeavesUnion counts leaf positions in the union of a and b (used to compute total compared fields).
+func countLeavesUnion(a, b interface{}) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return countLeaves(b)
+	}
+	if b == nil {
+		return countLeaves(a)
+	}
+
+	// both present
+	switch av := a.(type) {
+	case map[string]interface{}:
+		if bv, ok := b.(map[string]interface{}); ok {
+			keys := map[string]struct{}{}
+			for k := range av {
+				keys[k] = struct{}{}
+			}
+			for k := range bv {
+				keys[k] = struct{}{}
+			}
+			cnt := 0
+			for k := range keys {
+				cnt += countLeavesUnion(av[k], bv[k])
+			}
+			return cnt
+		}
+	case []interface{}:
+		if bv, ok := b.([]interface{}); ok {
+			max := len(av)
+			if len(bv) > max {
+				max = len(bv)
+			}
+			cnt := 0
+			for i := 0; i < max; i++ {
+				var aa, bb interface{}
+				if i < len(av) { aa = av[i] }
+				if i < len(bv) { bb = bv[i] }
+				cnt += countLeavesUnion(aa, bb)
+			}
+			return cnt
+		}
+	}
+	// differing types or primitives: treat as single leaf
+	return 1
+}
+
+func pathToJSONPointer(p string) string {
+	// our paths look like $.a.b[2].c -> convert to /a/b/2/c
+	if p == "$" || p == "$." || p == "" {
+		return "" // pointer to whole document
+	}
+	// strip leading $. or $
+	p = strings.TrimPrefix(p, "$")
+	p = strings.TrimPrefix(p, ".")
+	// replace . with / and [index] with /index
+	p = strings.ReplaceAll(p, ".", "/")
+	p = strings.ReplaceAll(p, "[", "/")
+	p = strings.ReplaceAll(p, "]", "")
+	// escape ~ and /
+	p = strings.ReplaceAll(p, "~", "~0")
+	p = strings.ReplaceAll(p, "/", "~1")
+	return "/" + p
+}
+
 func compareHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("--- /compare start ---")
 	fmt.Println("remote:", r.RemoteAddr, "method:", r.Method, "content-type:", r.Header.Get("Content-Type"), "content-length:", r.ContentLength)
@@ -501,9 +521,16 @@ func compareHandler(w http.ResponseWriter, r *http.Request) {
 
 	a := readPart("fileA")
 	b := readPart("fileB")
-	fmt.Println("payload lengths: A=", len(a), "B=", len(b))
+	// read ignoreWhitespace flag (defaults to true)
+	ignoreWhitespace := true
+	if v := r.FormValue("ignoreWhitespace"); v != "" {
+		if strings.ToLower(v) == "false" || v == "0" {
+			ignoreWhitespace = false
+		}
+	}
+	fmt.Println("payload lengths: A=", len(a), "B=", len(b), "ignoreWhitespace=", ignoreWhitespace)
 
-	res, err := doCompareTexts(a, b)
+	res, err := doCompareTexts(a, b, ignoreWhitespace)
 	if err != nil {
 		fmt.Println("doCompareTexts error:", err)
 		writeJSONError(http.StatusInternalServerError, "compare error: "+err.Error())
