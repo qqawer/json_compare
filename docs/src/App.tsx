@@ -3,7 +3,9 @@ import React, { useState, useEffect } from 'react'
 export default function App(){
   const [a, setA] = useState('')
   const [b, setB] = useState('')
-  const [ascii, setAscii] = useState('-- 比较结果将在这里显示 --')
+  const [ascii, setAscii] = useState(
+    "-- The comparison results will be displayed here --",
+  );
   const [diffList, setDiffList] = useState<any[]>([])
   const [errorA, setErrorA] = useState<string | null>(null)
   const [errorB, setErrorB] = useState<string | null>(null)

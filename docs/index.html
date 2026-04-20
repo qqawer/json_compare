@@ -7,9 +7,9 @@
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial; margin: 20px; }
 textarea { width:100%; min-height:280px; font-family: monospace; font-size:13px; padding:10px; box-sizing:border-box; }
 pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px; overflow:auto; white-space:pre-wrap; }
-.container { display:flex; gap:16px; }
+.container { display:flex; gap:16px; flex-wrap:wrap; }
 .col { flex:1; display:flex; flex-direction:column; }
-.controls { margin-top:8px; display:flex; gap:8px; align-items:center; }
+.controls { margin-top:8px; display:flex; gap:8px; align-items:center; overflow-x:auto; flex-wrap:nowrap; }
 .diff-list { margin-top:12px; border-collapse:collapse; width:100%; }
 .diff-list th, .diff-list td { border:1px solid #eee; padding:8px; text-align:left; vertical-align:top; }
 .type-added { background:#e6ffed; }
@@ -21,6 +21,7 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
 .tab.active { background:#fff; font-weight:600; box-shadow: 0 -2px 0 #fff inset; }
 .tab input { border:none; background:transparent; font-weight:600; width:120px; }
 .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+.buttonBar { display:flex; gap:8px; overflow-x:auto; white-space:nowrap; }
 </style>
 <!-- lz-string for compact workspace compression -->
 <script src="https://cdn.jsdelivr.net/npm/lz-string/libs/lz-string.min.js"></script>
@@ -36,43 +37,47 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
     <button id="exportWorkspace">Export Workspace (JSON)</button>
   </div>
 
+  <div style="margin-top:6px;">
+    <label style="font-size:13px;"><input type="checkbox" id="ignoreWs" checked /> 忽略空白差异（折叠换行/多空格，默认开启）</label>
+  </div>
+
   <div class="container">
     <div class="col">
-      <h4>v7SampleJson (editable)</h4>
-      <textarea id="ta" placeholder="Paste or edit v7SampleJson here"></textarea>
+      <h4>Pretty A (editable)</h4>
+      <textarea id="ta" placeholder="在此粘贴或编辑 JSON A"></textarea>
       <div id="errorA" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileA" accept="application/json" />
-         <button id="fmtA">Format v7SampleJson</button>
-         <button id="clearA">Clear v7SampleJson</button>
-         <button id="dlA">Download v7SampleJson</button>
+         <button id="fmtA">格式化 A</button>
+         <button id="clearA">清空 A</button>
+         <button id="dlA">下载 A</button>
        </div>
      </div>
 
      <div class="col">
-       <h4>GeminiJson (editable)</h4>
-       <textarea id="tb" placeholder="Paste or edit GeminiJson here"></textarea>
+       <h4>Pretty B (editable)</h4>
+       <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
       <div id="errorB" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileB" accept="application/json" />
-         <button id="fmtB">Format GeminiJson</button>
-         <button id="clearB">Clear GeminiJson</button>
-         <button id="dlB">Download GeminiJson</button>
+         <button id="fmtB">格式化 B</button>
+         <button id="clearB">清空 B</button>
+         <button id="dlB">下载 B</button>
        </div>
      </div>
    </div>
 
   <div style="margin-top:18px">
     <h4>Diff (ASCII)</h4>
-    <pre id="diff">-- Comparison results will appear here --</pre>
+    <pre id="diff">-- The comparison results will be displayed here --</pre>
 
     <h4 style="margin-top:12px">Structured differences</h4>
     <div id="diffContainer">
       <table class="diff-list" id="diffTable" style="display:none;">
-        <thead><tr><th>Path</th><th>Type</th><th>v7SampleJson</th><th>GeminiJson</th></tr></thead>
+        <thead><tr><th>Path</th><th>Type</th><th>A</th><th>B</th></tr></thead>
         <tbody id="diffBody"></tbody>
       </table>
-      <div id="noDiff" class="small">No differences or not compared yet</div>
+      <div id="noDiff" class="small">暂无差异或尚未比较</div>
     </div>
 
     <!-- Statistics: counts and metrics -->
@@ -80,14 +85,14 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
       <h4>Comparison statistics</h4>
       <div id="statsContainer" class="small" style="padding:8px; border:1px solid #eee; background:#fafafa; max-width:480px;"></div>
       <div style="margin-top:6px">
-        <button id="dlStats">Download Stats (JSON)</button>
+        <button id="dlStats">下载 统计 数据（JSON）</button>
       </div>
     </div>
 
-    <div style="margin-top:12px">
-      <button id="dlPatchReadable">Download Readable Patch (with old values)</button>
-      <button id="dlPatchRFC">Download Patch (RFC-6902)</button>
-      <button id="forceCompare">Force compare</button>
+    <div style="margin-top:12px" class="buttonBar">
+      <button id="dlPatchReadable">下载 Patch（可读，含旧值）</button>
+      <button id="dlPatchRFC">下载 Patch（RFC-6902）</button>
+      <button id="forceCompare">强制比较</button>
     </div>
    </div>
 
@@ -266,7 +271,7 @@ ta.addEventListener('input', ()=>{ maybeSaveGroup(); maybeCompare(); });
 tb.addEventListener('input', ()=>{ maybeSaveGroup(); maybeCompare(); });
 
 let autoCompare = true;
-const maybeCompare = debounce(()=>{ if((ta.value||'').trim()!=='' && (tb.value||'').trim()!=='') compare(); else { diffEl.textContent='-- 比较结果将在这里显示 --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; } }, 400);
+const maybeCompare = debounce(()=>{ if((ta.value||'').trim()!=='' && (tb.value||'').trim()!=='') compare(); else { diffEl.textContent='-- The comparison results will be displayed here --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; } }, 400);
 
 async function compare(){
   const aText = ta.value;
@@ -286,6 +291,8 @@ async function compare(){
   const fd = new FormData();
   fd.append('fileA', new Blob([aText], {type:'application/json'}), 'a.json');
   fd.append('fileB', new Blob([bText], {type:'application/json'}), 'b.json');
+  // send ignoreWhitespace flag
+  fd.append('ignoreWhitespace', (document.getElementById('ignoreWs')?.checked ? 'true' : 'false'));
   try{
     const res = await fetch('/compare', { method:'POST', body: fd });
     if(!res.ok){
@@ -304,7 +311,7 @@ async function compare(){
     window._serverPretty = { prettyA: j.prettyA, prettyB: j.prettyB };
     // only render diff if both panes non-empty
     if((ta.value||'').trim() === '' || (tb.value||'').trim() === ''){
-      diffEl.textContent = '-- 比较结果将在这里显示 --';
+      diffEl.textContent = '-- The comparison results will be displayed here --';
       diffTable.style.display='none'; noDiff.style.display='block';
       return;
     }
@@ -419,7 +426,7 @@ document.getElementById('dlPatchRFC').addEventListener('click', ()=>{
 loadFromHash();
 
 // render last result when switching groups
-function renderLastResult(j){ if(!j){ diffEl.textContent='-- 比较结果将在这里显示 --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; return; } if(j.identical){ diffEl.textContent='-- 两边语义相同 --'; diffTable.style.display='none'; noDiff.style.display='block'; renderStats(j.stats||null); return; } diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --'; renderDiffList(j.diffList||[]); renderStats(j.stats||null); }
+function renderLastResult(j){ if(!j){ diffEl.textContent='-- The comparison results will be displayed here --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; return; } if(j.identical){ diffEl.textContent='-- 两边语义相同 --'; diffTable.style.display='none'; noDiff.style.display='block'; renderStats(j.stats||null); return; } diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --'; renderDiffList(j.diffList||[]); renderStats(j.stats||null); }
 
 // allow dropping an exported workspace JSON to load
 window.addEventListener('dragover', (e)=> e.preventDefault());
