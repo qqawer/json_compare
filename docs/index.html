@@ -16,10 +16,16 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
 .type-removed { background:#fff0f0; }
 .type-modified { background:#fffbe6; }
 .small { font-size:12px; color:#666; }
-.tabs { display:flex; gap:6px; align-items:center; margin-bottom:12px; }
-.tab { padding:6px 10px; border:1px solid #ddd; border-bottom:none; background:#fafafa; cursor:pointer; }
+.tabs { display:flex; gap:6px; align-items:center; margin-bottom:12px; overflow-x:auto; white-space:nowrap; padding-bottom:10px; }
+.tab { padding:6px 10px; border:1px solid #ddd; border-bottom:none; background:#fafafa; cursor:pointer; flex: 0 0 auto; }
 .tab.active { background:#fff; font-weight:600; box-shadow: 0 -2px 0 #fff inset; }
-.tab input { border:none; background:transparent; font-weight:600; width:120px; }
+.tab input { border:none; background:transparent; font-weight:600; width:120px; display:inline-block; }
+
+/* thin, non-obscuring scrollbar for WebKit (macOS/Chrome) */
+.tabs::-webkit-scrollbar { height:10px; }
+.tabs::-webkit-scrollbar-track { background: transparent; }
+.tabs::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.18); border-radius:6px; }
+.tabs::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
 .toolbar { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
 .buttonBar { display:flex; gap:8px; overflow-x:auto; white-space:nowrap; }
 </style>
