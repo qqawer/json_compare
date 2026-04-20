@@ -38,31 +38,31 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
   </div>
 
   <div style="margin-top:6px;">
-    <label style="font-size:13px;"><input type="checkbox" id="ignoreWs" checked /> 忽略空白差异（折叠换行/多空格，默认开启）</label>
+    <label style="font-size:13px;"><input type="checkbox" id="ignoreWs" checked /> Ignore whitespace differences (collapse newlines / multiple spaces, default ON)</label>
   </div>
 
   <div class="container">
     <div class="col">
-      <h4>Pretty A (editable)</h4>
-      <textarea id="ta" placeholder="在此粘贴或编辑 JSON A"></textarea>
+      <h4>v7SampleJson (editable)</h4>
+      <textarea id="ta" placeholder="Paste or edit v7SampleJson here"></textarea>
       <div id="errorA" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileA" accept="application/json" />
-         <button id="fmtA">格式化 A</button>
-         <button id="clearA">清空 A</button>
-         <button id="dlA">下载 A</button>
+         <button id="fmtA">Format A</button>
+         <button id="clearA">Clear A</button>
+         <button id="dlA">Download A</button>
        </div>
      </div>
 
      <div class="col">
-       <h4>Pretty B (editable)</h4>
-       <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
+       <h4>GeminiJson (editable)</h4>
+       <textarea id="tb" placeholder="Paste or edit GeminiJson here"></textarea>
       <div id="errorB" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileB" accept="application/json" />
-         <button id="fmtB">格式化 B</button>
-         <button id="clearB">清空 B</button>
-         <button id="dlB">下载 B</button>
+         <button id="fmtB">Format B</button>
+         <button id="clearB">Clear B</button>
+         <button id="dlB">Download B</button>
        </div>
      </div>
    </div>
@@ -77,7 +77,7 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
         <thead><tr><th>Path</th><th>Type</th><th>A</th><th>B</th></tr></thead>
         <tbody id="diffBody"></tbody>
       </table>
-      <div id="noDiff" class="small">暂无差异或尚未比较</div>
+      <div id="noDiff" class="small">No differences or not compared yet</div>
     </div>
 
     <!-- Statistics: counts and metrics -->
@@ -85,14 +85,14 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
       <h4>Comparison statistics</h4>
       <div id="statsContainer" class="small" style="padding:8px; border:1px solid #eee; background:#fafafa; max-width:480px;"></div>
       <div style="margin-top:6px">
-        <button id="dlStats">下载 统计 数据（JSON）</button>
+        <button id="dlStats">Download stats (JSON)</button>
       </div>
     </div>
 
     <div style="margin-top:12px" class="buttonBar">
-      <button id="dlPatchReadable">下载 Patch（可读，含旧值）</button>
-      <button id="dlPatchRFC">下载 Patch（RFC-6902）</button>
-      <button id="forceCompare">强制比较</button>
+      <button id="dlPatchReadable">Download Readable Patch (with old values)</button>
+      <button id="dlPatchRFC">Download Patch (RFC-6902)</button>
+      <button id="forceCompare">Force Compare</button>
     </div>
    </div>
 
@@ -285,7 +285,7 @@ async function compare(){
   else { clearParseError('A'); }
   if(cErrB){ showParseError('B', cErrB); }
   else { clearParseError('B'); }
-  if(cErrA || cErrB){ diffEl.textContent = 'JSON 解析错误，请修复后再比较'; diffTable.style.display='none'; noDiff.style.display='block'; return; }
+  if(cErrA || cErrB){ diffEl.textContent = 'JSON parse error, please fix before comparing'; diffTable.style.display='none'; noDiff.style.display='block'; return; }
 
   diffEl.textContent = '比较中...';
   const fd = new FormData();
@@ -316,12 +316,12 @@ async function compare(){
       return;
     }
     if(j.identical){
-      diffEl.textContent = '-- 两边语义相同 --';
+      diffEl.textContent = '-- Both sides are semantically identical --';
       diffTable.style.display='none'; noDiff.style.display='block';
       renderStats(j.stats || null);
       window._last = j; groups[activeIndex].lastResult = j; return;
     }
-    diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --';
+    diffEl.textContent = j.asciiDiff || '-- No ascii diff --';
     renderDiffList(j.diffList || []);
     renderStats(j.stats || null);
     window._last = j; groups[activeIndex].lastResult = j;
@@ -426,7 +426,7 @@ document.getElementById('dlPatchRFC').addEventListener('click', ()=>{
 loadFromHash();
 
 // render last result when switching groups
-function renderLastResult(j){ if(!j){ diffEl.textContent='-- The comparison results will be displayed here --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; return; } if(j.identical){ diffEl.textContent='-- 两边语义相同 --'; diffTable.style.display='none'; noDiff.style.display='block'; renderStats(j.stats||null); return; } diffEl.textContent = j.asciiDiff || '-- 无 ascii 差异 --'; renderDiffList(j.diffList||[]); renderStats(j.stats||null); }
+function renderLastResult(j){ if(!j){ diffEl.textContent='-- The comparison results will be displayed here --'; diffTable.style.display='none'; noDiff.style.display='block'; document.getElementById('statsArea').style.display='none'; return; } if(j.identical){ diffEl.textContent = '-- Both sides are semantically identical --'; diffTable.style.display='none'; noDiff.style.display='block'; renderStats(j.stats||null); return; } diffEl.textContent = j.asciiDiff || '-- No ascii diff --'; renderDiffList(j.diffList||[]); renderStats(j.stats||null); }
 
 // allow dropping an exported workspace JSON to load
 window.addEventListener('dragover', (e)=> e.preventDefault());
