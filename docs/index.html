@@ -27,52 +27,52 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
 </head>
 <body>
   <h2>JSON Compare (local)</h2>
-  <p>支持多组对比，可为每组命名，切换查看，并一键分享或导出整个工作台。</p>
+  <p>Supports multiple comparison groups. Name each group, switch between them, and share or export the whole workspace with one click.</p>
 
   <div class="toolbar">
     <div class="tabs" id="tabs"></div>
-    <button id="addGroup">+ 新建对比组</button>
-    <button id="shareWorkspace">一键分享工作台</button>
-    <button id="exportWorkspace">下载工作台（JSON）</button>
+    <button id="addGroup">+ New Group</button>
+    <button id="shareWorkspace">Share Workspace</button>
+    <button id="exportWorkspace">Export Workspace (JSON)</button>
   </div>
 
   <div class="container">
     <div class="col">
-      <h4>Pretty A (editable)</h4>
-      <textarea id="ta" placeholder="在此粘贴或编辑 JSON A"></textarea>
+      <h4>v7SampleJson (editable)</h4>
+      <textarea id="ta" placeholder="Paste or edit v7SampleJson here"></textarea>
       <div id="errorA" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileA" accept="application/json" />
-         <button id="fmtA">格式化 A</button>
-         <button id="clearA">清空 A</button>
-         <button id="dlA">下载 A</button>
+         <button id="fmtA">Format v7SampleJson</button>
+         <button id="clearA">Clear v7SampleJson</button>
+         <button id="dlA">Download v7SampleJson</button>
        </div>
      </div>
 
      <div class="col">
-       <h4>Pretty B (editable)</h4>
-       <textarea id="tb" placeholder="在此粘贴或编辑 JSON B"></textarea>
+       <h4>GeminiJson (editable)</h4>
+       <textarea id="tb" placeholder="Paste or edit GeminiJson here"></textarea>
       <div id="errorB" class="small" style="color:#c00; display:none; margin-top:6px;"></div>
        <div class="controls">
          <input type="file" id="fileB" accept="application/json" />
-         <button id="fmtB">格式化 B</button>
-         <button id="clearB">清空 B</button>
-         <button id="dlB">下载 B</button>
+         <button id="fmtB">Format GeminiJson</button>
+         <button id="clearB">Clear GeminiJson</button>
+         <button id="dlB">Download GeminiJson</button>
        </div>
      </div>
    </div>
 
   <div style="margin-top:18px">
     <h4>Diff (ASCII)</h4>
-    <pre id="diff">-- 比较结果将在这里显示 --</pre>
+    <pre id="diff">-- Comparison results will appear here --</pre>
 
     <h4 style="margin-top:12px">Structured differences</h4>
     <div id="diffContainer">
       <table class="diff-list" id="diffTable" style="display:none;">
-        <thead><tr><th>Path</th><th>Type</th><th>A</th><th>B</th></tr></thead>
+        <thead><tr><th>Path</th><th>Type</th><th>v7SampleJson</th><th>GeminiJson</th></tr></thead>
         <tbody id="diffBody"></tbody>
       </table>
-      <div id="noDiff" class="small">暂无差异或尚未比较</div>
+      <div id="noDiff" class="small">No differences or not compared yet</div>
     </div>
 
     <!-- Statistics: counts and metrics -->
@@ -80,14 +80,14 @@ pre { background:#f6f8fa; padding:10px; border:1px solid #ddd; max-height:400px;
       <h4>Comparison statistics</h4>
       <div id="statsContainer" class="small" style="padding:8px; border:1px solid #eee; background:#fafafa; max-width:480px;"></div>
       <div style="margin-top:6px">
-        <button id="dlStats">下载 统计 数据（JSON）</button>
+        <button id="dlStats">Download Stats (JSON)</button>
       </div>
     </div>
 
     <div style="margin-top:12px">
-      <button id="dlPatchReadable">下载 Patch（可读，含旧值）</button>
-      <button id="dlPatchRFC">下载 Patch（RFC-6902）</button>
-      <button id="forceCompare">强制比较</button>
+      <button id="dlPatchReadable">Download Readable Patch (with old values)</button>
+      <button id="dlPatchRFC">Download Patch (RFC-6902)</button>
+      <button id="forceCompare">Force compare</button>
     </div>
    </div>
 
@@ -118,8 +118,8 @@ function showParseError(side, err){
   let msg = err.message || String(err);
   if(err.line){ msg += ' (line: '+err.line + (err.column? ', col: '+err.column : '') +')'; }
   // clickable jump if line available
-  if(err.line){ el.innerHTML = '<strong>JSON 解析错误：</strong>' + msg + ' <a href="#" onclick="(function(){ jumpToLineInTextarea('+(side==='A'?'ta':'tb')+','+err.line+'); return false; })()">跳转到行</a>'; }
-  else { el.textContent = 'JSON 解析错误：' + msg; }
+  if(err.line){ el.innerHTML = '<strong>JSON parse error:</strong> ' + msg + ' <a href="#" onclick="(function(){ jumpToLineInTextarea('+(side==='A'?'ta':'tb')+','+err.line+'); return false; })()">jump to line</a>'; }
+  else { el.textContent = 'JSON parse error: ' + msg; }
   el.style.display = 'block';
 }
 
@@ -163,8 +163,8 @@ function loadGroupToUI(idx){ const g = groups[idx]; if(!g) return; ta.value = g.
 function renderTabs(){ const tabs = document.getElementById('tabs'); tabs.innerHTML = ''; groups.forEach((g, i)=>{
   const div = document.createElement('div'); div.className='tab'+(i===activeIndex? ' active':'');
 
-  // title input: stop propagation so clicking to edit doesn't re-trigger tab switch reload
-  const inp = document.createElement('input'); inp.value = g.title; inp.title = '单击可编辑标题，回车确认';
+  // title input: stop propagation so clicking to edit doesn't re-trigger tab switch
+  const inp = document.createElement('input'); inp.value = g.title; inp.title = 'Double-click to edit title';
   inp.addEventListener('click', (e)=>{ e.stopPropagation(); /* focus for editing */ inp.focus(); inp.select(); activeIndex = i; });
   inp.addEventListener('input', ()=>{ g.title = inp.value; });
   inp.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); inp.blur(); renderTabs(); } if(e.key==='Escape'){ inp.blur(); renderTabs(); } });
@@ -174,9 +174,9 @@ function renderTabs(){ const tabs = document.getElementById('tabs'); tabs.innerH
 
   // tags display + edit button
   const tagWrap = document.createElement('span'); tagWrap.style.marginLeft='8px'; tagWrap.className='small';
-  const tagText = document.createElement('span'); tagText.textContent = (g.tags && g.tags.length) ? g.tags.join(', ') : '未设置标签';
+  const tagText = document.createElement('span'); tagText.textContent = (g.tags && g.tags.length) ? g.tags.join(', ') : 'No tags set';
   tagWrap.appendChild(tagText);
-  const tagEditBtn = document.createElement('button'); tagEditBtn.textContent='✎'; tagEditBtn.style.marginLeft='6px'; tagEditBtn.title='编辑标签';
+  const tagEditBtn = document.createElement('button'); tagEditBtn.textContent='✎'; tagEditBtn.style.marginLeft='6px'; tagEditBtn.title='Edit tags';
   tagEditBtn.addEventListener('click', (e)=>{
     e.stopPropagation();
     // replace content with an inline input for editing tags (comma-separated)
@@ -191,8 +191,8 @@ function renderTabs(){ const tabs = document.getElementById('tabs'); tabs.innerH
   div.appendChild(tagWrap);
 
   // delete button
-  const del = document.createElement('button'); del.textContent='✕'; del.style.marginLeft='6px'; del.title='删除分组';
-  del.addEventListener('click',(e)=>{ e.stopPropagation(); if(confirm('删除分组 "'+g.title+'" ?')){ groups.splice(i,1); if(activeIndex>=groups.length) activeIndex = groups.length-1; if(groups.length===0) { groups.push(makeEmptyGroup('Group 1')); activeIndex=0; } renderTabs(); loadGroupToUI(activeIndex); } });
+  const del = document.createElement('button'); del.textContent='✕'; del.style.marginLeft='6px'; del.title='Delete group';
+  del.addEventListener('click',(e)=>{ e.stopPropagation(); if(confirm('Delete group "'+g.title+'" ?')){ groups.splice(i,1); if(activeIndex>=groups.length) activeIndex = groups.length-1; if(groups.length===0) { groups.push(makeEmptyGroup('Group 1')); activeIndex=0; } renderTabs(); loadGroupToUI(activeIndex); } });
 
   // clicking the tab selects it (but do not blur title input if interacting)
   div.addEventListener('click', ()=>{ saveActiveToGroup(); activeIndex = i; renderTabs(); loadGroupToUI(i); });
@@ -212,14 +212,14 @@ function shareWorkspace(){ // create shareable URL with compressed JSON in hash
     // prefer LZ compression for much shorter URLs
     const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(out));
     const href = location.origin + location.pathname + '#workspace=' + compressed;
-    navigator.clipboard?.writeText(href).then(()=>{ alert('已生成分享链接并复制到剪贴板'); }).catch(()=>{ prompt('分享链接（请手动复制）', href); });
+    navigator.clipboard?.writeText(href).then(()=>{ alert('Share link generated and copied to clipboard'); }).catch(()=>{ prompt('Share link (copy manually)', href); });
   }catch(e){
     // fallback to base64 if compression fails
     try{
       const s = btoa(unescape(encodeURIComponent(JSON.stringify(out))));
       const href = location.origin + location.pathname + '#workspace=' + s;
-      navigator.clipboard?.writeText(href).then(()=>{ alert('已生成分享链接并复制到剪贴板'); }).catch(()=>{ prompt('分享链接（请手动复制）', href); });
-    }catch(err){ alert('生成分享链接失败: '+err.message); }
+      navigator.clipboard?.writeText(href).then(()=>{ alert('Share link generated and copied to clipboard'); }).catch(()=>{ prompt('Share link (copy manually)', href); });
+    }catch(err){ alert('Failed to generate share link: '+err.message); }
   }
 }
 
@@ -251,8 +251,8 @@ document.getElementById('fmtA').addEventListener('click', ()=> { ta.value = pret
 document.getElementById('fmtB').addEventListener('click', ()=> { tb.value = prettyTry(tb.value); tb.dispatchEvent(new Event('input')); });
 document.getElementById('clearA').addEventListener('click', ()=> { ta.value=''; ta.dispatchEvent(new Event('input')); });
 document.getElementById('clearB').addEventListener('click', ()=> { tb.value=''; tb.dispatchEvent(new Event('input')); });
-document.getElementById('dlA').addEventListener('click', ()=> dl('prettyA.json', ta.value));
-document.getElementById('dlB').addEventListener('click', ()=> dl('prettyB.json', tb.value));
+document.getElementById('dlA').addEventListener('click', ()=> dl('v7SampleJson.json', ta.value));
+document.getElementById('dlB').addEventListener('click', ()=> dl('GeminiJson.json', tb.value));
 document.getElementById('forceCompare').addEventListener('click', compare);
 
 document.getElementById('addGroup').addEventListener('click', addGroup);
@@ -336,7 +336,7 @@ function renderDiffList(list){ diffBody.innerHTML = ''; if(!list || list.length=
     if(item.type==='modified') tr.classList.add('type-modified');
     // clicking a diff row will try to jump to the key in both panes (A then B)
     tr.style.cursor = 'pointer';
-    tr.title = '点击跳转并选中对应字段（先在 A 中查找，再在 B 中）';
+    tr.title = 'Click to jump and select corresponding field (search in v7SampleJson then in GeminiJson)';
     tr.addEventListener('click', ()=> jumpToPathInPanes(item.path));
     diffBody.appendChild(tr);
   });
@@ -426,7 +426,7 @@ window.addEventListener('dragover', (e)=> e.preventDefault());
 window.addEventListener('drop', async (e)=>{
   e.preventDefault();
   const f = e.dataTransfer.files?.[0]; if(!f) return;
-  try{ const txt = await f.text(); const obj = JSON.parse(txt); if(obj && Array.isArray(obj.groups)){ groups = obj.groups; activeIndex=0; renderTabs(); loadGroupToUI(0); alert('已加载工作台'); } }catch(err){ console.warn(err); alert('加载失败'); }
+  try{ const txt = await f.text(); const obj = JSON.parse(txt); if(obj && Array.isArray(obj.groups)){ groups = obj.groups; activeIndex=0; renderTabs(); loadGroupToUI(0); alert('Workspace loaded'); } }catch(err){ console.warn(err); alert('Failed to load'); }
 });
 
 // no-op for old single-button listener removal (kept intentionally removed)
